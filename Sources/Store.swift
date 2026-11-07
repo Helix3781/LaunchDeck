@@ -483,10 +483,21 @@ final class AppModel: ObservableObject {
 
     // MARK: - Folders
 
+    /// Switching from a computed sort to a custom one keeps exactly what the user sees on screen.
+    private func materializeVisibleOrder() {
+        guard settings.sortMode != .custom else { return }
+        let visible = topLevelEntries.map(\.id)
+        let members = Set(folders.flatMap { $0.appIDs })
+        let hiddenApps = apps.map(\.id).filter { hidden.contains($0) && !members.contains($0) }
+        order = visible + hiddenApps
+        settings.sortMode = .custom
+    }
+
     func createFolder(sourceID: String, targetID: String) {
         guard sourceID != targetID,
               appMap[sourceID] != nil,
               appMap[targetID] != nil else { return }
+        materializeVisibleOrder()
         let folder = AppFolder(id: "folder." + UUID().uuidString, name: "文件夹", appIDs: [targetID, sourceID])
         folders.append(folder)
         order.removeAll { $0 == sourceID }
@@ -559,6 +570,7 @@ final class AppModel: ObservableObject {
 
     func moveItem(_ sourceID: String, relativeTo targetID: String, after: Bool) {
         guard sourceID != targetID else { return }
+        materializeVisibleOrder()
         var ids = topLevelEntries.map(\.id)
         guard let from = ids.firstIndex(of: sourceID) else { return }
         let moved = ids.remove(at: from)
@@ -570,6 +582,7 @@ final class AppModel: ObservableObject {
     }
 
     func moveItemToEnd(_ sourceID: String) {
+        materializeVisibleOrder()
         guard let from = order.firstIndex(of: sourceID) else { return }
         let moved = order.remove(at: from)
         order.append(moved)

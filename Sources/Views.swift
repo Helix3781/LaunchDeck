@@ -323,7 +323,7 @@ struct LauncherRootView: View {
                 isRunning: model.isRunning(item),
                 isSystem: model.isSystemApp(item),
                 isLaunching: model.launchingID == item.id,
-                draggable: model.settings.sortMode == .custom && !model.isSearching,
+                draggable: !model.isSearching,
                 onOpen: {
                     model.selection = index
                     model.launch(item)
@@ -809,6 +809,9 @@ struct SettingsView: View {
                     }
                 }
                 Button("重置为名称顺序") { model.settings.sortMode = .name }
+                Text("在任何排序方式下都可以拖拽；建文件夹或调序后会自动切回「自定义顺序」，画面不会重排。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
 
             Section("应用与数据") {
@@ -829,7 +832,7 @@ struct SettingsView: View {
             }
 
             Section("关于") {
-                LabeledContent("版本", value: "1.7 (8)")
+                LabeledContent("版本", value: "1.8 (9)")
                 LabeledContent("呼出快捷键", value: Shortcut.label)
                 Text("LaunchDeck 是一个自建的启动器：读取 /Applications、/System/Applications 与 ~/Applications，支持文件夹、拖拽排序、右键卸载、热角与自定义快捷键。")
                     .font(.callout)
