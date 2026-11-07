@@ -305,7 +305,7 @@ struct LauncherRootView: View {
                     .transition(pageTransition)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .animation(.spring(response: 0.4, dampingFraction: 0.9), value: model.page)
+                .animation(pageAnimation, value: model.page)
             }
         }
     }
@@ -372,10 +372,41 @@ struct LauncherRootView: View {
 
     private var pageTransition: AnyTransition {
         let forward = model.pageDirection >= 0
-        return .asymmetric(
-            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
-            removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)
-        )
+        switch model.settings.pageEffect {
+        case .slide:
+            return .asymmetric(
+                insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+                removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)
+            )
+        case .smooth:
+            // No fade: the two pages stay glued together and glide as one strip.
+            return .asymmetric(
+                insertion: .move(edge: forward ? .trailing : .leading),
+                removal: .move(edge: forward ? .leading : .trailing)
+            )
+        case .fade:
+            return .opacity
+        case .zoom:
+            return .asymmetric(
+                insertion: .scale(scale: 0.86, anchor: .center).combined(with: .opacity),
+                removal: .scale(scale: 1.08, anchor: .center).combined(with: .opacity)
+            )
+        case .flip:
+            return .flip3D(forward: forward)
+        case .none:
+            return .identity
+        }
+    }
+
+    private var pageAnimation: Animation {
+        switch model.settings.pageEffect {
+        case .smooth: return .spring(response: 0.44, dampingFraction: 0.95)
+        case .fade: return .easeInOut(duration: 0.22)
+        case .zoom: return .spring(response: 0.34, dampingFraction: 0.78)
+        case .flip: return .spring(response: 0.46, dampingFraction: 0.82)
+        case .slide: return .spring(response: 0.4, dampingFraction: 0.9)
+        case .none: return .linear(duration: 0.01)
+        }
     }
 
     private func handle(_ command: SearchCommand) {
@@ -489,6 +520,27 @@ struct AppCell: View {
         .opacity(isLaunching ? 0 : 1)
         .animation(.easeIn(duration: 0.18), value: isLaunching)
         .animation(.easeOut(duration: 0.15), value: hovering)
+    }
+}
+
+struct Flip3D: ViewModifier {
+    let angle: Double
+    let axis: (x: CGFloat, y: CGFloat, z: CGFloat)
+
+    func body(content: Content) -> some View {
+        content.rotation3DEffect(.degrees(angle), axis: axis, anchor: .center, perspective: 0.55)
+    }
+}
+
+extension AnyTransition {
+    static func flip3D(forward: Bool) -> AnyTransition {
+        let axis: (x: CGFloat, y: CGFloat, z: CGFloat) = (0, 1, 0)
+        return .asymmetric(
+            insertion: .modifier(active: Flip3D(angle: forward ? 72 : -72, axis: axis),
+                                 identity: Flip3D(angle: 0, axis: axis)).combined(with: .opacity),
+            removal: .modifier(active: Flip3D(angle: forward ? -72 : 72, axis: axis),
+                               identity: Flip3D(angle: 0, axis: axis)).combined(with: .opacity)
+        )
     }
 }
 
@@ -789,6 +841,17 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("动画") {
+                Picker("翻页特效", selection: $model.settings.pageEffect) {
+                    ForEach(PageEffect.allCases, id: \.self) { effect in
+                        Text(effect.label).tag(effect)
+                    }
+                }
+                Text("「丝滑平移」两页贴合着一起滑动，没有淡入淡出；「3D 翻转」按翻书方向绕竖轴转。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("外观") {
                 Toggle("模糊桌面壁纸", isOn: $model.settings.blurWallpaper)
                 Toggle("在搜索中包含已隐藏应用", isOn: $model.settings.showHiddenInSearch)
@@ -832,7 +895,7 @@ struct SettingsView: View {
             }
 
             Section("关于") {
-                LabeledContent("版本", value: "1.8 (9)")
+                LabeledContent("版本", value: "1.9 (10)")
                 LabeledContent("呼出快捷键", value: Shortcut.label)
                 Text("LaunchDeck 是一个自建的启动器：读取 /Applications、/System/Applications 与 ~/Applications，支持文件夹、拖拽排序、右键卸载、热角与自定义快捷键。")
                     .font(.callout)

@@ -59,6 +59,26 @@ enum SortMode: String, CaseIterable, Codable {
     }
 }
 
+enum PageEffect: String, CaseIterable, Codable {
+    case slide
+    case smooth
+    case fade
+    case zoom
+    case flip
+    case none
+
+    var label: String {
+        switch self {
+        case .slide: return "滑动 + 淡入（当前）"
+        case .smooth: return "丝滑平移"
+        case .fade: return "淡入淡出"
+        case .zoom: return "缩放"
+        case .flip: return "3D 翻转"
+        case .none: return "无特效"
+        }
+    }
+}
+
 enum HotCorner: String, CaseIterable, Codable {
     case off
     case topLeft
@@ -92,7 +112,7 @@ struct Usage: Codable {
 /// Version 3: the grid is described by columns, rows and a gap ratio; the icon size is derived so the
 /// block fills the panel with equal margins instead of a hand-tuned point size.
 struct Settings: Codable {
-    var version: Int = 5
+    var version: Int = 6
     var columns: Int = 8
     var rows: Int = 4
     var gapRatio: Double = 0.22
@@ -102,6 +122,7 @@ struct Settings: Codable {
     var blurWallpaper: Bool = true
     var dim: Double = 0.28
     var showHiddenInSearch: Bool = false
+    var pageEffect: PageEffect = .slide
     var hotCorner: HotCorner = .off
     var hideDock: Bool = false
     var launchAtLogin: Bool = false
@@ -110,7 +131,7 @@ struct Settings: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        version = 5
+        version = 6
         columns = try container.decodeIfPresent(Int.self, forKey: .columns) ?? 8
         rows = try container.decodeIfPresent(Int.self, forKey: .rows) ?? 4
         gapRatio = try container.decodeIfPresent(Double.self, forKey: .gapRatio) ?? 0.22
@@ -120,6 +141,7 @@ struct Settings: Codable {
         blurWallpaper = try container.decodeIfPresent(Bool.self, forKey: .blurWallpaper) ?? true
         dim = try container.decodeIfPresent(Double.self, forKey: .dim) ?? 0.28
         showHiddenInSearch = try container.decodeIfPresent(Bool.self, forKey: .showHiddenInSearch) ?? false
+        pageEffect = try container.decodeIfPresent(PageEffect.self, forKey: .pageEffect) ?? .slide
         hotCorner = try container.decodeIfPresent(HotCorner.self, forKey: .hotCorner) ?? .off
         hideDock = try container.decodeIfPresent(Bool.self, forKey: .hideDock) ?? false
         launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
@@ -136,6 +158,9 @@ struct Settings: Codable {
         }
         if storedVersion < 5 {
             gapRatio = 0.22
+        }
+        if storedVersion < 6 {
+            pageEffect = .slide
         }
     }
 }
