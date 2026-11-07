@@ -77,6 +77,12 @@ enum HotCorner: String, CaseIterable, Codable {
     }
 }
 
+struct UserAlert: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+}
+
 struct Usage: Codable {
     var count: Int = 0
     var last: Date = .distantPast

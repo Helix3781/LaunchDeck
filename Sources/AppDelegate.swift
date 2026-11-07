@@ -95,6 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ("app.hermes.LaunchDeck.debug.page", #selector(debugPage)),
                 ("app.hermes.LaunchDeck.debug.corner", #selector(debugCorner)),
                 ("app.hermes.LaunchDeck.debug.restart", #selector(debugRestart)),
+                ("app.hermes.LaunchDeck.debug.uninstallui", #selector(debugUninstallUI)),
+                ("app.hermes.LaunchDeck.debug.confirmuninstall", #selector(debugConfirmUninstall)),
             ]
             for (name, selector) in debugNames {
                 DistributedNotificationCenter.default().addObserver(
@@ -191,6 +193,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let id = note.userInfo?["id"] as? String,
               let app = model.apps.first(where: { $0.id == id }) else { return }
         model.uninstall(app, confirm: false)
+    }
+
+    @objc private func debugUninstallUI(_ note: Notification) {
+        guard let id = note.userInfo?["id"] as? String,
+              let app = model.apps.first(where: { $0.id == id }) else { return }
+        model.uninstall(app)
+    }
+
+    @objc private func debugConfirmUninstall() {
+        model.confirmUninstall()
     }
 
     @objc private func debugDissolve(_ note: Notification) {

@@ -124,6 +124,47 @@ struct LauncherRootView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
                     .zIndex(2)
             }
+
+            if model.isUninstalling {
+                VStack(spacing: 14) {
+                    ProgressView()
+                        .controlSize(.large)
+                    Text("正在移到废纸篓…")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+                .padding(.horizontal, 34)
+                .padding(.vertical, 26)
+                .background(RoundedRectangle(cornerRadius: 20).fill(.ultraThinMaterial))
+                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.16), lineWidth: 1))
+                .shadow(color: .black.opacity(0.4), radius: 30, y: 12)
+                .zIndex(3)
+                .transition(.opacity)
+            }
+        }
+        .alert(uninstallTitle, isPresented: Binding(
+            get: { model.pendingUninstall != nil },
+            set: { if !$0 { model.cancelUninstall() } }
+        )) {
+            Button("移到废纸篓", role: .destructive) { model.confirmUninstall() }
+            Button("取消", role: .cancel) { model.cancelUninstall() }
+        } message: {
+            Text("应用会被移到废纸篓，之后仍可从废纸篓恢复。")
+        }
+        .alert("重命名文件夹", isPresented: Binding(
+            get: { model.renamingFolderID != nil },
+            set: { if !$0 { model.cancelRenameFolder() } }
+        )) {
+            TextField("名称", text: $model.renamingText)
+            Button("好") { model.commitRenameFolder() }
+            Button("取消", role: .cancel) { model.cancelRenameFolder() }
+        } message: {
+            Text("给文件夹起个新名字")
+        }
+        .alert(item: $model.userAlert) { item in
+            Alert(title: Text(item.title),
+                  message: Text(item.message),
+                  dismissButton: .default(Text("好")))
         }
         .animation(.easeOut(duration: 0.18), value: model.openFolderID)
         .contextMenu { backgroundMenu }
@@ -314,7 +355,7 @@ struct LauncherRootView: View {
                     model.selection = index
                     model.openFolderID = folder.id
                 },
-                onRename: { model.renameFolder(folder.id) },
+                onRename: { model.requestRenameFolder(folder.id) },
                 onDissolve: { model.dissolveFolder(folder.id) },
                 onDrop: { payload in
                     guard !payload.hasPrefix("folder.") else { return false }
@@ -323,6 +364,10 @@ struct LauncherRootView: View {
                 }
             )
         }
+    }
+
+    private var uninstallTitle: String {
+        "卸载 “\(model.pendingUninstall?.name ?? "")”？"
     }
 
     private var pageTransition: AnyTransition {
@@ -784,7 +829,7 @@ struct SettingsView: View {
             }
 
             Section("关于") {
-                LabeledContent("版本", value: "1.6 (7)")
+                LabeledContent("版本", value: "1.7 (8)")
                 LabeledContent("呼出快捷键", value: Shortcut.label)
                 Text("LaunchDeck 是一个自建的启动器：读取 /Applications、/System/Applications 与 ~/Applications，支持文件夹、拖拽排序、右键卸载、热角与自定义快捷键。")
                     .font(.callout)

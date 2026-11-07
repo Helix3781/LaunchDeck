@@ -40,6 +40,11 @@ final class AppModel: ObservableObject {
     @Published var panelVisible = false
     @Published var pageDirection = 1
     @Published var launchingID: String?
+    @Published var pendingUninstall: AppItem?
+    @Published var isUninstalling = false
+    @Published var userAlert: UserAlert?
+    @Published var renamingFolderID: String?
+    @Published var renamingText: String = ""
 
     private var order: [String] = []
     private let supportDir: URL
@@ -394,36 +399,58 @@ final class AppModel: ObservableObject {
         return path.hasPrefix("/System/") || path.hasPrefix("/Library/") || path.hasPrefix("/usr/")
     }
 
-    /// Moves the bundle to the Trash, then forgets it. `confirm` shows the warning dialog.
+    /// Asks for confirmation; the actual trash happens off the main thread in `confirmUninstall`.
     func uninstall(_ item: AppItem, confirm: Bool = true) {
         guard !isSystemApp(item) else {
-            presentAlert("无法卸载系统应用", "“\(item.name)” 属于 macOS，不能移到废纸篓。")
+            userAlert = UserAlert(title: "无法卸载系统应用",
+                                  message: "“\(item.name)” 属于 macOS，不能移到废纸篓。")
             return
         }
-
         if confirm {
-            let alert = NSAlert()
-            alert.messageText = "要卸载 “\(item.name)” 吗？"
-            alert.informativeText = "应用会被移到废纸篓，之后仍可从废纸篓恢复。"
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "移到废纸篓")
-            alert.addButton(withTitle: "取消")
-            NSApp.activate(ignoringOtherApps: true)
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            pendingUninstall = item
+        } else {
+            performUninstall(item)
         }
+    }
 
-        NSRunningApplication.runningApplications(withBundleIdentifier: item.bundleID ?? "")
-            .first?.terminate()
+    func cancelUninstall() {
+        pendingUninstall = nil
+    }
 
-        do {
-            try FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
-        } catch {
-            presentAlert("卸载失败", error.localizedDescription)
-            return
+    func confirmUninstall() {
+        guard let item = pendingUninstall else { return }
+        pendingUninstall = nil
+        performUninstall(item)
+    }
+
+    private func performUninstall(_ item: AppItem) {
+        guard !isUninstalling else { return }
+        isUninstalling = true
+
+        let url = item.url
+        let bundleID = item.bundleID
+        let appID = item.id
+
+        Task.detached(priority: .userInitiated) {
+            if let bundleID {
+                NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.terminate()
+            }
+            var failure: String?
+            do {
+                try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            } catch {
+                failure = error.localizedDescription
+            }
+            await MainActor.run {
+                self.isUninstalling = false
+                if let failure {
+                    self.userAlert = UserAlert(title: "卸载失败", message: failure)
+                    return
+                }
+                self.forget(appID)
+                self.rescan()
+            }
         }
-
-        forget(item.id)
-        rescan()
     }
 
     private func forget(_ id: String) {
@@ -508,23 +535,24 @@ final class AppModel: ObservableObject {
         saveLayout()
     }
 
-    func renameFolder(_ folderID: String) {
-        guard let index = folders.firstIndex(where: { $0.id == folderID }) else { return }
-        let alert = NSAlert()
-        alert.messageText = "重命名文件夹"
-        alert.addButton(withTitle: "好")
-        alert.addButton(withTitle: "取消")
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
-        field.stringValue = folders[index].name
-        alert.accessoryView = field
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn {
-            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !name.isEmpty {
-                folders[index].name = name
-                saveLayout()
-            }
-        }
+    func requestRenameFolder(_ folderID: String) {
+        guard let folder = folders.first(where: { $0.id == folderID }) else { return }
+        renamingText = folder.name
+        renamingFolderID = folderID
+    }
+
+    func commitRenameFolder() {
+        defer { renamingFolderID = nil }
+        guard let id = renamingFolderID,
+              let index = folders.firstIndex(where: { $0.id == id }) else { return }
+        let name = renamingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        folders[index].name = name
+        saveLayout()
+    }
+
+    func cancelRenameFolder() {
+        renamingFolderID = nil
     }
 
     // MARK: - Reordering
