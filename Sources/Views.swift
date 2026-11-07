@@ -878,7 +878,7 @@ struct SettingsView: View {
             }
 
             Section("关于") {
-                LabeledContent("版本", value: "1.10 (11)")
+                LabeledContent("版本", value: "1.11 (12)")
                 LabeledContent("呼出快捷键", value: Shortcut.label)
                 Text("LaunchDeck 是一个自建的启动器：读取 /Applications、/System/Applications 与 ~/Applications，支持文件夹、拖拽排序、右键卸载、热角与自定义快捷键。")
                     .font(.callout)

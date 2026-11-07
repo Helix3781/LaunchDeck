@@ -37,6 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var scrollMonitor: Any?
     private var cornerTimer: Timer?
     private var cornerArmed = true
+    private var edgeSide = 0
+    private var edgeDwell = Date.distantPast
+    private var lastEdgeFlip = Date.distantPast
+    private var dragLastPoint: NSPoint?
 
     private let launchDate = Date()
     private var isHiding = false
@@ -99,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ("app.hermes.LaunchDeck.debug.confirmuninstall", #selector(debugConfirmUninstall)),
                 ("app.hermes.LaunchDeck.debug.effect", #selector(debugEffect)),
                 ("app.hermes.LaunchDeck.debug.dump", #selector(debugDump)),
+                ("app.hermes.LaunchDeck.debug.edge", #selector(debugEdge)),
             ]
             for (name, selector) in debugNames {
                 DistributedNotificationCenter.default().addObserver(
@@ -113,8 +118,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(restartRequested),
                                                name: .launchDeckRestart, object: nil)
 
-        cornerTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.checkHotCorner() }
+        cornerTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.checkHotCorner()
+                self?.checkDragEdge()
+            }
         }
 
         if !UserDefaults.standard.bool(forKey: "launchdeck.seen") {
@@ -216,6 +224,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let name = note.userInfo?["name"] as? String,
               let effect = PageEffect(rawValue: name) else { return }
         model.settings.pageEffect = effect
+    }
+
+    @objc private func debugEdge(_ note: Notification) {
+        let side = (note.userInfo?["side"] as? String).flatMap(Int.init) ?? 1
+        flipPage(by: side)
     }
 
     @objc private func debugDump() {
@@ -371,6 +384,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             scrollY = 0
             scrollCooldown = now.addingTimeInterval(0.22)
         }
+    }
+
+    // MARK: - Drag to the screen edge flips a page
+
+    /// While the left button is held and the pointer sits against the screen edge, flip one page.
+    /// Works for icon drags because the drag session keeps the button down and the cursor moves.
+    private func checkDragEdge() {
+        guard let panel, panel.isVisible else {
+            edgeSide = 0
+            return
+        }
+        guard NSEvent.pressedMouseButtons & 1 != 0 else {
+            edgeSide = 0
+            dragLastPoint = nil
+            return
+        }
+
+        let mouse = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) else { return }
+        let frame = screen.frame
+        let inset: CGFloat = 12
+
+        var side = 0
+        if mouse.x - frame.minX < inset {
+            side = -1
+        } else if frame.maxX - mouse.x < inset {
+            side = 1
+        }
+        defer { dragLastPoint = mouse }
+        guard side != 0 else {
+            edgeSide = 0
+            return
+        }
+
+        // Require a little movement first so a click near the edge does not flip anything.
+        if let last = dragLastPoint, hypot(mouse.x - last.x, mouse.y - last.y) < 0.8, edgeSide != side {
+            return
+        }
+
+        let now = Date()
+        if edgeSide != side {
+            edgeSide = side
+            edgeDwell = now
+        }
+        guard now.timeIntervalSince(edgeDwell) > 0.28,
+              now.timeIntervalSince(lastEdgeFlip) > 0.45 else { return }
+
+        lastEdgeFlip = now
+        edgeDwell = now
+        flipPage(by: side)
+    }
+
+    private func flipPage(by delta: Int) {
+        let target = model.page + delta
+        guard target >= 0, target < model.pageCount else { return }
+        model.select(page: target)
     }
 
     // MARK: - Hot corner
