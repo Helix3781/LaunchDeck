@@ -98,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ("app.hermes.LaunchDeck.debug.uninstallui", #selector(debugUninstallUI)),
                 ("app.hermes.LaunchDeck.debug.confirmuninstall", #selector(debugConfirmUninstall)),
                 ("app.hermes.LaunchDeck.debug.effect", #selector(debugEffect)),
+                ("app.hermes.LaunchDeck.debug.dump", #selector(debugDump)),
             ]
             for (name, selector) in debugNames {
                 DistributedNotificationCenter.default().addObserver(
@@ -215,6 +216,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let name = note.userInfo?["name"] as? String,
               let effect = PageEffect(rawValue: name) else { return }
         model.settings.pageEffect = effect
+    }
+
+    @objc private func debugDump() {
+        let state: [String: Any] = [
+            "page": model.page,
+            "pageCount": model.pageCount,
+            "effect": model.settings.pageEffect.rawValue,
+            "items": model.visibleItems.count,
+            "selection": model.selection,
+            "folders": model.folders.count,
+            "panelVisible": model.panelVisible,
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted]) {
+            try? data.write(to: URL(fileURLWithPath: "/tmp/launchdeck-state.json"))
+        }
     }
 
     @objc private func debugKey(_ note: Notification) {

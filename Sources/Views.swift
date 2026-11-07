@@ -297,7 +297,6 @@ struct LauncherRootView: View {
                             let globalIndex = model.page * model.perPage + index
                             cell(for: entry, index: globalIndex, iconSize: iconSize, cellWidth: cellWidth)
                                 .frame(width: cellWidth, height: cellHeight)
-                                .modifier(AppearOnPage(delay: Double(index) * 0.012))
                         }
                     }
                     .offset(x: dragOffset)
@@ -405,7 +404,7 @@ struct LauncherRootView: View {
         case .zoom: return .spring(response: 0.34, dampingFraction: 0.78)
         case .flip: return .spring(response: 0.46, dampingFraction: 0.82)
         case .slide: return .spring(response: 0.4, dampingFraction: 0.9)
-        case .none: return .linear(duration: 0.01)
+        case .none: return .linear(duration: 0.001)
         }
     }
 
@@ -541,22 +540,6 @@ extension AnyTransition {
             removal: .modifier(active: Flip3D(angle: forward ? -72 : 72, axis: axis),
                                identity: Flip3D(angle: 0, axis: axis)).combined(with: .opacity)
         )
-    }
-}
-
-struct AppearOnPage: ViewModifier {
-    let delay: Double
-    @State private var shown = false
-
-    func body(content: Content) -> some View {
-        content
-            .opacity(shown ? 1 : 0)
-            .scaleEffect(shown ? 1 : 0.88)
-            .onAppear {
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.8).delay(min(delay, 0.2))) {
-                    shown = true
-                }
-            }
     }
 }
 
@@ -895,7 +878,7 @@ struct SettingsView: View {
             }
 
             Section("关于") {
-                LabeledContent("版本", value: "1.9 (10)")
+                LabeledContent("版本", value: "1.10 (11)")
                 LabeledContent("呼出快捷键", value: Shortcut.label)
                 Text("LaunchDeck 是一个自建的启动器：读取 /Applications、/System/Applications 与 ~/Applications，支持文件夹、拖拽排序、右键卸载、热角与自定义快捷键。")
                     .font(.callout)
