@@ -1,0 +1,5 @@
+.DS_Store
+.build/
+build/LaunchDeck.iconset/
+build/icon-1024.png
+*.xcuserstate
