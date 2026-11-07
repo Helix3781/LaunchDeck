@@ -86,10 +86,10 @@ struct Usage: Codable {
 /// Version 3: the grid is described by columns, rows and a gap ratio; the icon size is derived so the
 /// block fills the panel with equal margins instead of a hand-tuned point size.
 struct Settings: Codable {
-    var version: Int = 4
+    var version: Int = 5
     var columns: Int = 8
     var rows: Int = 4
-    var gapRatio: Double = 0.18
+    var gapRatio: Double = 0.22
     var iconScale: Double = 0.85
     var showLabels: Bool = true
     var sortMode: SortMode = .custom
@@ -104,10 +104,10 @@ struct Settings: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        version = 4
+        version = 5
         columns = try container.decodeIfPresent(Int.self, forKey: .columns) ?? 8
         rows = try container.decodeIfPresent(Int.self, forKey: .rows) ?? 4
-        gapRatio = try container.decodeIfPresent(Double.self, forKey: .gapRatio) ?? 0.18
+        gapRatio = try container.decodeIfPresent(Double.self, forKey: .gapRatio) ?? 0.22
         iconScale = try container.decodeIfPresent(Double.self, forKey: .iconScale) ?? 0.85
         showLabels = try container.decodeIfPresent(Bool.self, forKey: .showLabels) ?? true
         sortMode = try container.decodeIfPresent(SortMode.self, forKey: .sortMode) ?? .custom
@@ -124,10 +124,12 @@ struct Settings: Codable {
         if storedVersion < 3 {
             columns = 8
             rows = 4
-            gapRatio = 0.18
         }
         if storedVersion < 4 {
             iconScale = 0.85
+        }
+        if storedVersion < 5 {
+            gapRatio = 0.22
         }
     }
 }

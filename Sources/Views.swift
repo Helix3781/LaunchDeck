@@ -156,6 +156,10 @@ struct LauncherRootView: View {
                     .opacity(0.55)
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            NotificationCenter.default.post(name: .launchDeckShouldClose, object: nil)
+        }
         .contextMenu { backgroundMenu }
     }
 
@@ -221,6 +225,9 @@ struct LauncherRootView: View {
                     // Press-and-drag on empty space flips pages; the grid follows the pointer.
                     Color.clear
                         .contentShape(Rectangle())
+                        .onTapGesture {
+                            NotificationCenter.default.post(name: .launchDeckShouldClose, object: nil)
+                        }
                         .gesture(
                             DragGesture(minimumDistance: 20)
                                 .onChanged { value in
@@ -692,17 +699,17 @@ struct SettingsView: View {
                 Stepper("竖排：\(model.settings.rows) 格", value: $model.settings.rows, in: 2 ... 8)
                 HStack {
                     Text("间距")
-                    Slider(value: $model.settings.gapRatio, in: 0.08 ... 0.34, step: 0.01)
+                    Slider(value: $model.settings.gapRatio, in: 0.10 ... 0.40, step: 0.01)
                     Text("\(Int(model.settings.gapRatio * 100))%")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                         .frame(width: 46, alignment: .trailing)
-                    Button("自动") { model.settings.gapRatio = 0.18 }
+                    Button("自动") { model.settings.gapRatio = 0.22 }
                         .buttonStyle(.link)
                 }
                 HStack {
                     Text("图标大小")
-                    Slider(value: $model.settings.iconScale, in: 0.55 ... 1.1, step: 0.01)
+                    Slider(value: $model.settings.iconScale, in: 0.55 ... 1.0, step: 0.01)
                     Text("\(Int(model.settings.iconScale * 100))%")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
@@ -777,7 +784,7 @@ struct SettingsView: View {
             }
 
             Section("关于") {
-                LabeledContent("版本", value: "1.5 (6)")
+                LabeledContent("版本", value: "1.6 (7)")
                 LabeledContent("呼出快捷键", value: Shortcut.label)
                 Text("LaunchDeck 是一个自建的启动器：读取 /Applications、/System/Applications 与 ~/Applications，支持文件夹、拖拽排序、右键卸载、热角与自定义快捷键。")
                     .font(.callout)

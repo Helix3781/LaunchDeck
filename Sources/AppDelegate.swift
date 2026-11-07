@@ -38,10 +38,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cornerTimer: Timer?
     private var cornerArmed = true
 
+    private let launchDate = Date()
+    private var isHiding = false
     private var scrollX: CGFloat = 0
     private var scrollY: CGFloat = 0
     private var lastScroll = Date.distantPast
     private var scrollCooldown = Date.distantPast
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !model.panelVisible { show() }
+        return true
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard Date().timeIntervalSince(launchDate) > 2 else { return }
+        guard !model.panelVisible else { return }
+        guard NSApp.modalWindow == nil else { return }
+        if let settingsWindow, settingsWindow.isVisible { return }
+        show()
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        guard model.panelVisible else { return }
+        if let settingsWindow, settingsWindow.isVisible { return }
+        if NSApp.modalWindow != nil { return }
+        hide()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         ProcessInfo.processInfo.disableAutomaticTermination("overlay launcher keeps running")
@@ -247,14 +269,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func hide() {
-        guard let panel, panel.isVisible else { return }
+        guard let panel, panel.isVisible, !isHiding else { return }
+        isHiding = true
 
         model.panelVisible = false
         NSApp.presentationOptions = []
 
         // Let the SwiftUI scale/fade finish before the panel leaves the screen.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak self] in
             panel.orderOut(nil)
+            self?.isHiding = false
             NSApp.hide(nil)
         }
     }
@@ -393,6 +417,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuQuit() { NSApp.terminate(nil) }
 
     @objc private func menuSettings() {
+        // The settings window is a normal window; the full-screen panel would cover it.
+        if let panel, panel.isVisible {
+            model.panelVisible = false
+            panel.orderOut(nil)
+        }
         if let window = settingsWindow {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
