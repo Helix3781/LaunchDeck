@@ -55,7 +55,8 @@ enum AppScanner {
         guard let bundle = Bundle(url: url) else { return nil }
         let info = bundle.infoDictionary ?? [:]
         if (info["CFBundlePackageType"] as? String) != "APPL" { return nil }
-        if (info["LSUIElement"] as? Bool) == true { return nil }
+        // LSUIElement apps (menu-bar apps like Docker Desktop) stay visible, matching Launchpad;
+        // only true background-only agents are excluded.
         if (info["LSBackgroundOnly"] as? Bool) == true { return nil }
 
         let bundleID = bundle.bundleIdentifier
