@@ -193,6 +193,7 @@ final class AppModel: ObservableObject {
     func load() {
         readLayout()
         rescan()
+        startWatching()
     }
 
     func rescan() {
@@ -209,6 +210,55 @@ final class AppModel: ObservableObject {
                 self.clampSelection()
             }
         }
+    }
+
+    // MARK: - Auto rescan
+
+    private var dirWatchers: [DispatchSourceFileSystemObject] = []
+    private var installObservers: [NSObjectProtocol] = []
+    private var rescanDebounce: DispatchWorkItem?
+
+    /// Watches the scan roots so apps installed or removed while the panel runs
+    /// show up (or disappear) without a manual rescan or an app restart.
+    private func startWatching() {
+        guard dirWatchers.isEmpty else { return }
+
+        let fm = FileManager.default
+        var watched = Set<String>()
+        for root in AppScanner.roots {
+            let path = root.path
+            guard watched.insert(path).inserted, fm.fileExists(atPath: path) else { continue }
+            let fd = open(path, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd,
+                eventMask: [.write, .rename, .delete],
+                queue: .main
+            )
+            source.setEventHandler { [weak self] in self?.scheduleRescan() }
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            dirWatchers.append(source)
+        }
+
+        let center = NSWorkspace.shared.notificationCenter
+        // Raw names: didInstall/UninstallApplicationNotification symbols are unavailable
+        // in recent SDKs, but the notifications themselves are still posted.
+        for name in [Notification.Name("NSWorkspaceDidInstallApplicationNotification"),
+                     Notification.Name("NSWorkspaceDidUninstallApplicationNotification")] {
+            let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.scheduleRescan()
+            }
+            installObservers.append(observer)
+        }
+    }
+
+    /// Installer copies churn the directory for a while; wait for things to settle.
+    private func scheduleRescan() {
+        rescanDebounce?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.rescan() }
+        rescanDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
     }
 
     private func readLayout() {
