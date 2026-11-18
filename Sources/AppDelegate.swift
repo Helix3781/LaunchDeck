@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: LauncherPanel?
     private var statusItem: NSStatusItem?
     private var hotKey: HotKeyManager?
+    private let screenshotPicker = ScreenshotPicker()
     private var settingsWindow: NSWindow?
     private var keyMonitor: Any?
     private var scrollMonitor: Any?
@@ -44,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let launchDate = Date()
     private var isHiding = false
+    private var isPickingScreenshot = false
     private var scrollX: CGFloat = 0
     private var scrollY: CGFloat = 0
     private var lastScroll = Date.distantPast
@@ -57,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidBecomeActive(_ notification: Notification) {
         guard Date().timeIntervalSince(launchDate) > 2 else { return }
         guard !model.panelVisible else { return }
+        guard !isPickingScreenshot else { return }
         guard NSApp.modalWindow == nil else { return }
         if let settingsWindow, settingsWindow.isVisible { return }
         show()
@@ -75,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.load()
         setupStatusItem()
 
-        hotKey = HotKeyManager { [weak self] in self?.toggle() }
+        hotKey = HotKeyManager()
         registerHotKey()
         NotificationCenter.default.addObserver(self, selector: #selector(hotKeyChanged),
                                                name: .launchDeckHotKeyChanged, object: nil)
@@ -84,6 +87,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(distributedToggle),
             name: NSNotification.Name("app.hermes.LaunchDeck.toggle"),
+            object: nil
+        )
+
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(distributedScreenshot),
+            name: NSNotification.Name("app.hermes.LaunchDeck.screenshot"),
             object: nil
         )
 
@@ -98,6 +108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ("app.hermes.LaunchDeck.debug.dissolve", #selector(debugDissolve)),
                 ("app.hermes.LaunchDeck.debug.page", #selector(debugPage)),
                 ("app.hermes.LaunchDeck.debug.corner", #selector(debugCorner)),
+                ("app.hermes.LaunchDeck.debug.shot", #selector(debugShot)),
+                ("app.hermes.LaunchDeck.debug.shotui", #selector(debugShotUI)),
                 ("app.hermes.LaunchDeck.debug.restart", #selector(debugRestart)),
                 ("app.hermes.LaunchDeck.debug.uninstallui", #selector(debugUninstallUI)),
                 ("app.hermes.LaunchDeck.debug.confirmuninstall", #selector(debugConfirmUninstall)),
@@ -164,7 +176,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func registerHotKey() {
-        hotKey?.register(keyCode: Shortcut.keyCode, modifiers: Shortcut.modifiers)
+        hotKey?.register(.panel, keyCode: Shortcut.keyCode, modifiers: Shortcut.modifiers) { [weak self] in
+            self?.toggle()
+        }
+        hotKey?.register(.screenshot, keyCode: Shortcut.screenshotKeyCode, modifiers: Shortcut.screenshotModifiers) { [weak self] in
+            self?.startScreenshot()
+        }
+    }
+
+    // MARK: - Screenshot
+
+    @objc private func distributedScreenshot() { startScreenshot() }
+
+    func startScreenshot() {
+        guard ScreenshotPicker.hasPermission else {
+            ScreenshotPicker.explainPermission()
+            return
+        }
+
+        if model.panelVisible { hide() }
+        if let settingsWindow, settingsWindow.isVisible { settingsWindow.orderOut(nil) }
+
+        isPickingScreenshot = true
+        screenshotPicker.begin { [weak self] outcome in
+            self?.isPickingScreenshot = false
+            switch outcome {
+            case .copied(let size):
+                ScreenshotToast.show("已复制到剪贴板 · \(Int(size.width)) × \(Int(size.height))")
+            case .cancelled:
+                break
+            case .failed(let message):
+                ScreenshotToast.show(message, duration: 2.6)
+            }
+        }
+    }
+
+    /// Debug: skip the overlay and capture a fixed rectangle, so the capture + pasteboard path
+    /// can be exercised without synthesising mouse events.
+    @objc private func debugShotUI(_ note: Notification) {
+        guard ScreenshotPicker.hasPermission else {
+            NSLog("LaunchDeck: debug shot UI needs screen recording permission")
+            return
+        }
+        guard let screen = targetScreen() else { return }
+        if model.panelVisible { hide() }
+        let width = (note.userInfo?["w"] as? String).flatMap(Double.init) ?? 480
+        let height = (note.userInfo?["h"] as? String).flatMap(Double.init) ?? 300
+        let rect = NSRect(x: screen.frame.midX - width / 2,
+                          y: screen.frame.midY - height / 2,
+                          width: width,
+                          height: height)
+
+        isPickingScreenshot = true
+        screenshotPicker.begin(autoRect: rect) { [weak self] outcome in
+            self?.isPickingScreenshot = false
+            switch outcome {
+            case .copied(let size):
+                NSLog("LaunchDeck: debug shot UI copied %.0fx%.0f", size.width, size.height)
+                ScreenshotToast.show("已复制到剪贴板 · \(Int(size.width)) × \(Int(size.height))")
+            case .cancelled:
+                NSLog("LaunchDeck: debug shot UI cancelled")
+            case .failed(let message):
+                NSLog("LaunchDeck: debug shot UI failed: %@", message)
+                ScreenshotToast.show(message, duration: 2.6)
+            }
+        }
     }
 
     // MARK: - Debug hooks
@@ -186,6 +262,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let x = (note.userInfo?["x"] as? String).flatMap(Double.init) ?? 2
         let y = (note.userInfo?["y"] as? String).flatMap(Double.init) ?? 2
         checkHotCorner(at: CGPoint(x: x, y: y))
+    }
+
+    /// Debug: copy a fixed rectangle of the screen so the capture/pasteboard path can be checked
+    /// without driving the mouse across the selection overlay.
+    @objc private func debugShot(_ note: Notification) {
+        guard let screen = targetScreen() else { return }
+        let width = (note.userInfo?["w"] as? String).flatMap(Double.init) ?? 400
+        let height = (note.userInfo?["h"] as? String).flatMap(Double.init) ?? 240
+        let rect = NSRect(x: screen.frame.midX - width / 2,
+                          y: screen.frame.midY - height / 2,
+                          width: width,
+                          height: height)
+        if let image = ScreenshotCapture.image(for: rect, on: screen), ScreenshotCapture.copy(image) {
+            NSLog("LaunchDeck: debug shot copied %.0fx%.0f", image.size.width, image.size.height)
+        } else {
+            NSLog("LaunchDeck: debug shot failed (screen recording permission?)")
+        }
     }
 
     @objc private func debugFolder(_ note: Notification) {
@@ -291,7 +384,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let wallpaper = Wallpaper.image(for: screen, blurred: model.settings.blurWallpaper)
         let root = AnyView(
-            LauncherRootView(model: model, wallpaper: wallpaper)
+            LauncherRootView(model: model, wallpaper: wallpaper, panelSize: screen.frame.size)
                 .frame(width: screen.frame.width, height: screen.frame.height)
         )
         let host = NSHostingView(rootView: root)
@@ -508,6 +601,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeStatusMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(withTitle: "打开 LaunchDeck", action: #selector(menuOpen), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "截图并复制到剪贴板", action: #selector(menuScreenshot), keyEquivalent: "").target = self
         menu.addItem(withTitle: "设置…", action: #selector(menuSettings), keyEquivalent: ",").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "重新扫描应用", action: #selector(menuRescan), keyEquivalent: "").target = self
@@ -517,6 +611,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func menuOpen() { show() }
+    @objc private func menuScreenshot() { startScreenshot() }
     @objc private func menuRescan() { model.rescan() }
     @objc private func menuQuit() { NSApp.terminate(nil) }
 

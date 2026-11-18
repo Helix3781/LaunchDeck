@@ -98,26 +98,43 @@ struct SearchField: NSViewRepresentable {
 struct LauncherRootView: View {
     @ObservedObject var model: AppModel
     let wallpaper: NSImage?
+    /// The screen the panel was opened on. Taken from AppKit instead of a GeometryReader so the
+    /// grid maths never depends on the size a parent hands down — a reader inside the stack used
+    /// to be offered an unbounded height, which grew the panel past the screen and pushed the
+    /// first grid row off the top edge.
+    let panelSize: CGSize
+
+    /// Side padding of the icon grid inside the panel.
+    static let horizontalInset: Double = 92
+    /// Panel chrome outside the grid: search block (54 + 48 + 30) plus the dot row (22 + 12 + 36).
+    static let chromeHeight: Double = 54 + 48 + 30 + 22 + 12 + 36
 
     @State private var focusTick = 0
     @State private var dragOffset: CGFloat = 0
 
     var body: some View {
-        ZStack {
+        let gridSize = CGSize(
+            width: max(240, panelSize.width - Self.horizontalInset * 2),
+            height: max(200, panelSize.height - Self.chromeHeight)
+        )
+
+        return ZStack {
             background
 
             VStack(spacing: 0) {
                 searchBar
                     .padding(.top, 54)
 
-                grid
+                grid(size: gridSize)
+                    .frame(width: gridSize.width, height: gridSize.height)
                     .padding(.top, 30)
-                    .padding(.horizontal, 92)
+                    .padding(.horizontal, Self.horizontalInset)
 
                 PageDots(model: model)
                     .padding(.top, 22)
                     .padding(.bottom, 36)
             }
+            .frame(width: panelSize.width, height: panelSize.height)
 
             if let folder = model.openFolder {
                 FolderOverlay(model: model, folder: folder)
@@ -229,83 +246,89 @@ struct LauncherRootView: View {
     }
 
     @ViewBuilder
-    private var grid: some View {
-        GeometryReader { geo in
-            let columns = max(1, model.settings.columns)
-            let rows = max(1, model.settings.rows)
-            let labelHeight = model.settings.showLabels ? 28.0 : 0.0
-            let rowHeight = geo.size.height / Double(rows)
+    private func grid(size: CGSize) -> some View {
+        let columns = max(1, model.settings.columns)
+        let rows = max(1, model.settings.rows)
+        let labelHeight = model.settings.showLabels ? 28.0 : 0.0
+        let rowHeight = size.height / Double(rows)
 
-            // Fit the icon to the row, then let the leftover become the gap. The icon is capped by
-            // the column width so a wide grid still fits, and the block is centred by the parent.
-            let gap0 = rowHeight * model.settings.gapRatio
-            let maxByWidth = geo.size.width / Double(columns) - gap0
-            let baseIcon = min(max(44, rowHeight - labelHeight - gap0), max(40, maxByWidth))
-            let iconSize = max(28, baseIcon * model.settings.iconScale)
-            let gap = max(8, rowHeight - labelHeight - iconSize)
+        // Fit the icon to the row, then let the leftover become the gap. The icon is capped by
+        // the column width so a wide grid still fits, and the block is centred by the parent.
+        let gap0 = rowHeight * model.settings.gapRatio
+        let maxByWidth = size.width / Double(columns) - gap0
+        let baseIcon = min(max(44, rowHeight - labelHeight - gap0), max(40, maxByWidth))
+        // The icon scale may not swallow the row: keep at least 8pt of gap under each label.
+        let iconSize = min(max(28, baseIcon * model.settings.iconScale), max(28, rowHeight - labelHeight - 8))
+        // The gap is the icon-to-icon spacing. It follows the row height, but never more than the
+        // column slot allows, or a wide grid (many columns, few rows) runs past the screen edges.
+        let gap = max(8, min(rowHeight - labelHeight - iconSize, size.width / Double(columns) - iconSize))
 
-            let pad = min(18.0, gap * 0.4)
-            let cellWidth = iconSize + pad * 2
-            let cellHeight = iconSize + labelHeight + pad * 2
-            let columnSpacing = max(0, gap - pad * 2)
-            let rowSpacing = max(0, gap - pad * 2)
+        let pad = min(18.0, gap * 0.4)
+        let cellWidth = iconSize + pad * 2
+        let cellHeight = iconSize + labelHeight + pad * 2
+        let columnSpacing = max(0, gap - pad * 2)
+        let rowSpacing = max(0, gap - pad * 2)
+        // LazyVGrid lays fixed columns out from its leading edge, so pin the grid to its own
+        // content width and let the enclosing ZStack centre it; without this a grid narrower
+        // than the panel sits hard against the left padding.
+        let contentWidth = Double(columns) * cellWidth + Double(columns - 1) * columnSpacing
 
-            let items = model.currentPageItems
+        let items = model.currentPageItems
 
-            if items.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: model.isSearching ? "magnifyingglass" : "square.grid.3x3")
-                        .font(.system(size: 38, weight: .light))
-                    Text(model.isSearching ? "没有找到匹配的应用" : "没有找到应用")
-                        .font(.system(size: 16))
-                }
-                .foregroundStyle(.white.opacity(0.55))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ZStack {
-                    // Press-and-drag on empty space flips pages; the grid follows the pointer.
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            NotificationCenter.default.post(name: .launchDeckShouldClose, object: nil)
-                        }
-                        .gesture(
-                            DragGesture(minimumDistance: 20)
-                                .onChanged { value in
-                                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                                    dragOffset = value.translation.width * 0.35
-                                }
-                                .onEnded { value in
-                                    let dx = value.translation.width
-                                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                                        dragOffset = 0
-                                    }
-                                    guard abs(dx) > abs(value.translation.height), abs(dx) > 110 else { return }
-                                    if dx < 0 {
-                                        model.select(page: model.page + 1)
-                                    } else {
-                                        model.select(page: model.page - 1)
-                                    }
-                                }
-                        )
-
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.fixed(cellWidth), spacing: columnSpacing), count: columns),
-                        spacing: rowSpacing
-                    ) {
-                        ForEach(Array(items.enumerated()), id: \.element.id) { index, entry in
-                            let globalIndex = model.page * model.perPage + index
-                            cell(for: entry, index: globalIndex, iconSize: iconSize, cellWidth: cellWidth)
-                                .frame(width: cellWidth, height: cellHeight)
-                        }
-                    }
-                    .offset(x: dragOffset)
-                    .id(model.page)
-                    .transition(pageTransition)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .animation(pageAnimation, value: model.page)
+        if items.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: model.isSearching ? "magnifyingglass" : "square.grid.3x3")
+                    .font(.system(size: 38, weight: .light))
+                Text(model.isSearching ? "没有找到匹配的应用" : "没有找到应用")
+                    .font(.system(size: 16))
             }
+            .foregroundStyle(.white.opacity(0.55))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ZStack {
+                // Press-and-drag on empty space flips pages; the grid follows the pointer.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        NotificationCenter.default.post(name: .launchDeckShouldClose, object: nil)
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 20)
+                            .onChanged { value in
+                                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                                dragOffset = value.translation.width * 0.35
+                            }
+                            .onEnded { value in
+                                let dx = value.translation.width
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                                    dragOffset = 0
+                                }
+                                guard abs(dx) > abs(value.translation.height), abs(dx) > 110 else { return }
+                                if dx < 0 {
+                                    model.select(page: model.page + 1)
+                                } else {
+                                    model.select(page: model.page - 1)
+                                }
+                            }
+                    )
+
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.fixed(cellWidth), spacing: columnSpacing), count: columns),
+                    spacing: rowSpacing
+                ) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, entry in
+                        let globalIndex = model.page * model.perPage + index
+                        cell(for: entry, index: globalIndex, iconSize: iconSize, cellWidth: cellWidth)
+                            .frame(width: cellWidth, height: cellHeight)
+                    }
+                }
+                .frame(width: contentWidth)
+                .offset(x: dragOffset)
+                .id(model.page)
+                .transition(pageTransition)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .animation(pageAnimation, value: model.page)
         }
     }
 
@@ -769,7 +792,7 @@ struct VisualEffect: NSViewRepresentable {
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
-    @State private var recording = false
+    @State private var recording: Shortcut.Slot?
     @State private var recorder: Any?
 
     var body: some View {
@@ -815,9 +838,21 @@ struct SettingsView: View {
                     Text(Shortcut.label)
                         .font(.system(.body, design: .monospaced))
                         .foregroundStyle(.secondary)
-                    Button(recording ? "请按下…" : "录制") { toggleRecording() }
+                    Button(recording == .panel ? "请按下…" : "录制") { toggleRecording(.panel) }
                     Button("还原") { Shortcut.reset() }
                 }
+                HStack {
+                    Text("截图快捷键")
+                    Spacer()
+                    Text(Shortcut.screenshotLabel)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Button(recording == .screenshot ? "请按下…" : "录制") { toggleRecording(.screenshot) }
+                    Button("还原") { Shortcut.resetScreenshot() }
+                }
+                Text("按下截图快捷键后拖动框选屏幕区域（也可以点两次定角），松开即复制到剪贴板，按 Esc 取消。首次使用需要在系统设置里允许 LaunchDeck 的「屏幕录制」权限。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 Toggle("打开时隐藏 Dock 和菜单栏", isOn: $model.settings.hideDock)
                 Text("触控板左右轻扫、滚轮上下滚动、在空白处按住拖动都可以翻页。")
                     .font(.callout)
@@ -878,8 +913,9 @@ struct SettingsView: View {
             }
 
             Section("关于") {
-                LabeledContent("版本", value: "1.11 (12)")
+                LabeledContent("版本", value: "1.15 (15)")
                 LabeledContent("呼出快捷键", value: Shortcut.label)
+                LabeledContent("截图快捷键", value: Shortcut.screenshotLabel)
                 Text("LaunchDeck 是一个自建的启动器：读取 /Applications、/System/Applications 与 ~/Applications，支持文件夹、拖拽排序、右键卸载、热角与自定义快捷键。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -889,32 +925,43 @@ struct SettingsView: View {
         .frame(width: 500, height: 760)
     }
 
-    private func toggleRecording() {
-        if recording {
-            if let recorder { NSEvent.removeMonitor(recorder) }
-            self.recorder = nil
-            recording = false
+    private func toggleRecording(_ slot: Shortcut.Slot) {
+        if recording != nil {
+            stopRecording()
             return
         }
-        recording = true
+        recording = slot
         recorder = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 { // Esc cancels recording
-                recording = false
-                if let recorder { NSEvent.removeMonitor(recorder) }
-                self.recorder = nil
+                stopRecording()
                 return nil
             }
             let modifiers = Shortcut.carbonModifiers(from: event.modifierFlags)
             guard modifiers != 0 else { return nil }
+            let keyCode = UInt32(event.keyCode)
+            let other: Shortcut.Slot = slot == .panel ? .screenshot : .panel
+            guard !Shortcut.conflicts(with: other, keyCode: keyCode, modifiers: modifiers) else {
+                NSSound.beep()
+                return nil
+            }
             let label = Shortcut.describe(keyCode: event.keyCode,
                                           characters: event.charactersIgnoringModifiers,
                                           flags: event.modifierFlags)
-            Shortcut.save(keyCode: UInt32(event.keyCode), modifiers: modifiers, label: label)
-            recording = false
-            if let recorder { NSEvent.removeMonitor(recorder) }
-            self.recorder = nil
+            switch slot {
+            case .panel:
+                Shortcut.save(keyCode: keyCode, modifiers: modifiers, label: label)
+            case .screenshot:
+                Shortcut.saveScreenshot(keyCode: keyCode, modifiers: modifiers, label: label)
+            }
+            stopRecording()
             return nil
         }
+    }
+
+    private func stopRecording() {
+        if let recorder { NSEvent.removeMonitor(recorder) }
+        recorder = nil
+        recording = nil
     }
 
     private func exportLayout() {
